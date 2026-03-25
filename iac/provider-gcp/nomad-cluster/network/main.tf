@@ -310,11 +310,16 @@ resource "google_compute_target_https_proxy" "default" {
   certificate_map = "//certificatemanager.googleapis.com/${google_certificate_manager_certificate_map.certificate_map.id}"
 }
 
+resource "google_compute_global_address" "lb_static_ip" {
+  name = "${var.prefix}lb-static-ip"
+}
+
 resource "google_compute_global_forwarding_rule" "https" {
   name                  = "${var.prefix}forwarding-rule-https"
   target                = google_compute_target_https_proxy.default.self_link
   load_balancing_scheme = "EXTERNAL_MANAGED"
   port_range            = "443"
+  ip_address            = google_compute_global_address.lb_static_ip.address
   labels                = var.labels
 }
 
@@ -469,6 +474,22 @@ resource "google_compute_firewall" "client_proxy_firewall_ingress" {
   # Load balancer health check IP ranges
   # https://cloud.google.com/load-balancing/docs/health-check-concepts
   source_ranges = ["130.211.0.0/22", "35.191.0.0/16"]
+}
+
+resource "google_compute_firewall" "local_pc_ingress" {
+  name    = "${var.prefix}${var.cluster_tag_name}-local-pc-ingress"
+  network = var.network_name
+
+  allow {
+    protocol = "tcp"
+    ports    = ["22", "3002", "5000", "8800"]
+  }
+
+  priority = 800
+
+  direction     = "INGRESS"
+  target_tags   = [var.cluster_tag_name]
+  source_ranges = [var.allowed_source_ip]
 }
 
 resource "google_compute_firewall" "internal_remote_connection_firewall_ingress" {
@@ -675,26 +696,23 @@ resource "google_compute_security_policy" "disable-bots-log-collector" {
 
 # Cloud Router for NAT
 resource "google_compute_router" "nat_router" {
-  count   = var.api_use_nat ? 1 : 0
   name    = "${var.prefix}nat-router"
   network = var.network_name
   region  = var.gcp_region
 }
 
-# Static IP addresses for NAT (only created if explicit IPs not provided)
-resource "google_compute_address" "nat_ips" {
-  count  = var.api_use_nat && length(var.api_nat_ips) == 0 ? 2 : 0
-  name   = "${var.prefix}nat-ip-${count.index + 1}"
+# Static IP address for NAT
+resource "google_compute_address" "nat_ip" {
+  name   = "${var.prefix}nat-ip"
   region = var.gcp_region
 }
 
-# Cloud NAT for API nodes
+# Cloud NAT for all nodes
 resource "google_compute_router_nat" "api_nat" {
-  count                              = var.api_use_nat ? 1 : 0
   name                               = "${var.prefix}api-nat"
-  router                             = google_compute_router.nat_router[0].name
+  router                             = google_compute_router.nat_router.name
   nat_ip_allocate_option             = "MANUAL_ONLY"
-  nat_ips                            = length(var.api_nat_ips) > 0 ? var.api_nat_ips : google_compute_address.nat_ips[*].self_link
+  nat_ips                            = [google_compute_address.nat_ip.self_link]
   source_subnetwork_ip_ranges_to_nat = "ALL_SUBNETWORKS_ALL_IP_RANGES"
   min_ports_per_vm                   = var.api_nat_min_ports_per_vm
 
