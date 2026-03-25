@@ -312,6 +312,10 @@ resource "google_compute_target_https_proxy" "default" {
 
 resource "google_compute_global_address" "lb_static_ip" {
   name = "${var.prefix}lb-static-ip"
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "google_compute_global_forwarding_rule" "https" {
@@ -705,6 +709,36 @@ resource "google_compute_router" "nat_router" {
 resource "google_compute_address" "nat_ip" {
   name   = "${var.prefix}nat-ip"
   region = var.gcp_region
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "google_compute_address" "e2b_static_ip" {
+  name   = "${var.prefix}static-ip"
+  region = var.gcp_region
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "google_compute_firewall" "allow_inbound" {
+  name    = "${var.prefix}allow-inbound"
+  network = var.network_name
+
+  allow {
+    protocol = "tcp"
+    ports    = ["22", "80", "443", "3002", "5000", "8800"]
+  }
+
+  source_ranges = ["10.0.0.1/32"] # TODO: replace with your PC's public IP /32
+  target_tags   = ["e2b-node"]
+}
+
+output "e2b_static_ip_address" {
+  value = google_compute_address.e2b_static_ip.address
 }
 
 # Cloud NAT for all nodes

@@ -82,6 +82,10 @@ resource "google_compute_global_forwarding_rule" "ingress" {
 resource "google_compute_global_address" "ingress_ipv4" {
   name       = "${var.prefix}ingress-ipv4"
   ip_version = "IPV4"
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "google_compute_ssl_policy" "ingress" {

@@ -126,7 +126,7 @@ resource "google_compute_instance_template" "api" {
       goog-ops-agent-policy = "v2-x86-template-1-2-0-${var.gcp_zone}"
     } : {})
   )
-  tags                    = [var.cluster_tag_name]
+  tags                    = [var.cluster_tag_name, "e2b-node"]
   metadata_startup_script = local.api_startup_script
   metadata = merge(
     { api_cluster = "TRUE" },
