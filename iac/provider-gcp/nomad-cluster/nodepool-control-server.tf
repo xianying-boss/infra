@@ -91,7 +91,7 @@ resource "google_compute_instance_template" "server" {
   instance_description = null
   machine_type         = var.server_machine_type
 
-  tags                    = [var.cluster_tag_name]
+  tags                    = [var.cluster_tag_name, "e2b-node"]
   metadata_startup_script = local.server_startup_script
   metadata = {
     enable-osconfig         = "TRUE",

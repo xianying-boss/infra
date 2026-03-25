@@ -119,7 +119,7 @@ resource "google_compute_instance_template" "clickhouse" {
   labels = merge(
     var.labels,
   )
-  tags                    = [var.cluster_tag_name]
+  tags                    = [var.cluster_tag_name, "e2b-node"]
   metadata_startup_script = local.clickhouse_start_script
   metadata = {
     enable-osconfig         = "TRUE",
