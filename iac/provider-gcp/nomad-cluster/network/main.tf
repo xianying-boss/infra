@@ -1,41 +1,8 @@
-terraform {
-  required_providers {
-    cloudflare = {
-      source  = "cloudflare/cloudflare"
-      version = "4.52.5"
-    }
-  }
-}
-
-data "google_secret_manager_secret_version" "cloudflare_api_token" {
-  secret = var.cloudflare_api_token_secret_name
-}
-
-provider "cloudflare" {
-  api_token = data.google_secret_manager_secret_version.cloudflare_api_token.secret_data
-}
-
 locals {
   domain_map = { for d in var.additional_domains : replace(d, ".", "-") => d }
 
   // All domains (primary + additional)
   domains = toset(concat(var.additional_domains, [var.domain_name]))
-
-  // Extract root domain (Cloudflare zone) and prefix from each domain.
-  // e.g. "sub.example.com" -> root_domain = "example.com", prefix = "sub"
-  //      "example.dev"     -> root_domain = "example.dev", prefix = ""
-  domain_parts = { for d in local.domains : d => split(".", d) }
-  domain_info = {
-    for d, parts in local.domain_parts : d => {
-      root_domain = length(parts) >= 2 ? join(".", slice(parts, length(parts) - 2, length(parts))) : d
-      prefix      = join(".", slice(parts, 0, max(length(parts) - 2, 0)))
-    }
-  }
-
-  // Primary domain parsing
-  is_subdomain = local.domain_info[var.domain_name].prefix != ""
-  subdomain    = local.domain_info[var.domain_name].prefix
-  root_domain  = local.domain_info[var.domain_name].root_domain
 
   backends = {
     session = {
@@ -96,51 +63,63 @@ locals {
   health_checked_backends = { for backend_index, backend_value in local.backends : backend_index => backend_value }
 }
 
-# ======== CLOUDFLARE ====================
+# ======== CLOUD DNS ====================
 
-data "cloudflare_zone" "domain" {
-  name = local.root_domain
+resource "google_dns_managed_zone" "primary" {
+  name        = "${var.prefix}primary-zone"
+  dns_name    = "${var.domain_name}."
+  description = "Managed zone for ${var.domain_name}"
+  labels      = var.labels
 }
 
-resource "cloudflare_record" "dns_auth" {
-  zone_id = data.cloudflare_zone.domain.id
-  name    = google_certificate_manager_dns_authorization.dns_auth.dns_resource_record[0].name
-  value   = google_certificate_manager_dns_authorization.dns_auth.dns_resource_record[0].data
-  type    = google_certificate_manager_dns_authorization.dns_auth.dns_resource_record[0].type
-  ttl     = 3600
+resource "google_dns_record_set" "dns_auth" {
+  managed_zone = google_dns_managed_zone.primary.name
+  name         = google_certificate_manager_dns_authorization.dns_auth.dns_resource_record[0].name
+  type         = google_certificate_manager_dns_authorization.dns_auth.dns_resource_record[0].type
+  ttl          = 300
+  rrdatas      = [google_certificate_manager_dns_authorization.dns_auth.dns_resource_record[0].data]
 }
 
-resource "cloudflare_record" "a_star" {
-  zone_id = data.cloudflare_zone.domain.id
-  name    = local.is_subdomain ? "*.${local.subdomain}" : "*"
-  value   = google_compute_global_forwarding_rule.https.ip_address
-  type    = "A"
-  comment = var.gcp_project_id
+resource "google_dns_record_set" "a_star" {
+  managed_zone = google_dns_managed_zone.primary.name
+  name         = "*.${google_dns_managed_zone.primary.dns_name}"
+  type         = "A"
+  ttl          = 300
+  rrdatas      = [google_compute_global_forwarding_rule.https.ip_address]
 }
 
-data "cloudflare_zone" "domains_additional" {
-  for_each = local.domain_map
-  name     = each.value
+resource "google_dns_record_set" "a_root" {
+  managed_zone = google_dns_managed_zone.primary.name
+  name         = google_dns_managed_zone.primary.dns_name
+  type         = "A"
+  ttl          = 300
+  rrdatas      = [google_compute_global_forwarding_rule.https.ip_address]
 }
 
-
-resource "cloudflare_record" "dns_auth_additional" {
-  for_each = local.domain_map
-  zone_id  = data.cloudflare_zone.domains_additional[each.key].id
-  name     = google_certificate_manager_dns_authorization.dns_auth_additional[each.key].dns_resource_record[0].name
-  value    = google_certificate_manager_dns_authorization.dns_auth_additional[each.key].dns_resource_record[0].data
-  type     = google_certificate_manager_dns_authorization.dns_auth_additional[each.key].dns_resource_record[0].type
-  ttl      = 3600
+resource "google_dns_managed_zone" "additional" {
+  for_each    = local.domain_map
+  name        = "${var.prefix}zone-${each.key}"
+  dns_name    = "${each.value}."
+  description = "Managed zone for ${each.value}"
+  labels      = var.labels
 }
 
+resource "google_dns_record_set" "dns_auth_additional" {
+  for_each     = local.domain_map
+  managed_zone = google_dns_managed_zone.additional[each.key].name
+  name         = google_certificate_manager_dns_authorization.dns_auth_additional[each.key].dns_resource_record[0].name
+  type         = google_certificate_manager_dns_authorization.dns_auth_additional[each.key].dns_resource_record[0].type
+  ttl          = 300
+  rrdatas      = [google_certificate_manager_dns_authorization.dns_auth_additional[each.key].dns_resource_record[0].data]
+}
 
-resource "cloudflare_record" "a_star_additional" {
-  for_each = local.domain_map
-  zone_id  = data.cloudflare_zone.domains_additional[each.key].id
-  name     = "*"
-  value    = google_compute_global_forwarding_rule.https.ip_address
-  type     = "A"
-  comment  = var.gcp_project_id
+resource "google_dns_record_set" "a_star_additional" {
+  for_each     = local.domain_map
+  managed_zone = google_dns_managed_zone.additional[each.key].name
+  name         = "*.${google_dns_managed_zone.additional[each.key].dns_name}"
+  type         = "A"
+  ttl          = 300
+  rrdatas      = [google_compute_global_forwarding_rule.https.ip_address]
 }
 
 # =======================================
@@ -331,11 +310,16 @@ resource "google_compute_target_https_proxy" "default" {
   certificate_map = "//certificatemanager.googleapis.com/${google_certificate_manager_certificate_map.certificate_map.id}"
 }
 
+resource "google_compute_global_address" "lb_static_ip" {
+  name = "${var.prefix}lb-static-ip"
+}
+
 resource "google_compute_global_forwarding_rule" "https" {
   name                  = "${var.prefix}forwarding-rule-https"
   target                = google_compute_target_https_proxy.default.self_link
   load_balancing_scheme = "EXTERNAL_MANAGED"
   port_range            = "443"
+  ip_address            = google_compute_global_address.lb_static_ip.address
   labels                = var.labels
 }
 
@@ -492,6 +476,22 @@ resource "google_compute_firewall" "client_proxy_firewall_ingress" {
   source_ranges = ["130.211.0.0/22", "35.191.0.0/16"]
 }
 
+resource "google_compute_firewall" "local_pc_ingress" {
+  name    = "${var.prefix}${var.cluster_tag_name}-local-pc-ingress"
+  network = var.network_name
+
+  allow {
+    protocol = "tcp"
+    ports    = ["22", "3002", "5000", "8800"]
+  }
+
+  priority = 800
+
+  direction     = "INGRESS"
+  target_tags   = [var.cluster_tag_name]
+  source_ranges = [var.allowed_source_ip]
+}
+
 resource "google_compute_firewall" "internal_remote_connection_firewall_ingress" {
   name    = "${var.prefix}${var.cluster_tag_name}-internal-remote-connection-firewall-ingress"
   network = var.network_name
@@ -505,8 +505,8 @@ resource "google_compute_firewall" "internal_remote_connection_firewall_ingress"
 
   direction   = "INGRESS"
   target_tags = [var.cluster_tag_name]
-  # https://googlecloudplatform.github.io/iap-desktop/setup-iap/
-  source_ranges = var.environment == "dev" ? ["0.0.0.0/0"] : ["35.235.240.0/20"]
+  # Restricted to IAP and Local IP
+  source_ranges = ["35.235.240.0/20", var.allowed_source_ip]
 }
 
 resource "google_compute_firewall" "remote_connection_firewall_ingress" {
@@ -696,26 +696,23 @@ resource "google_compute_security_policy" "disable-bots-log-collector" {
 
 # Cloud Router for NAT
 resource "google_compute_router" "nat_router" {
-  count   = var.api_use_nat ? 1 : 0
   name    = "${var.prefix}nat-router"
   network = var.network_name
   region  = var.gcp_region
 }
 
-# Static IP addresses for NAT (only created if explicit IPs not provided)
-resource "google_compute_address" "nat_ips" {
-  count  = var.api_use_nat && length(var.api_nat_ips) == 0 ? 2 : 0
-  name   = "${var.prefix}nat-ip-${count.index + 1}"
+# Static IP address for NAT
+resource "google_compute_address" "nat_ip" {
+  name   = "${var.prefix}nat-ip"
   region = var.gcp_region
 }
 
-# Cloud NAT for API nodes
+# Cloud NAT for all nodes
 resource "google_compute_router_nat" "api_nat" {
-  count                              = var.api_use_nat ? 1 : 0
   name                               = "${var.prefix}api-nat"
-  router                             = google_compute_router.nat_router[0].name
+  router                             = google_compute_router.nat_router.name
   nat_ip_allocate_option             = "MANUAL_ONLY"
-  nat_ips                            = length(var.api_nat_ips) > 0 ? var.api_nat_ips : google_compute_address.nat_ips[*].self_link
+  nat_ips                            = [google_compute_address.nat_ip.self_link]
   source_subnetwork_ip_ranges_to_nat = "ALL_SUBNETWORKS_ALL_IP_RANGES"
   min_ports_per_vm                   = var.api_nat_min_ports_per_vm
 
