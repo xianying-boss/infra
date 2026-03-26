@@ -1,21 +1,12 @@
 locals {
   subdomains = ["dashboard-api"]
 
-  ingress_zones = toset([for info in local.domain_info : info.root_domain])
-
   // Create matrix for each domain and subdomain combination.
-  // record_name combines the subdomain with the domain prefix so the DNS record
-  // is created under the correct Cloudflare zone.
-  // e.g. domain "sub.example.com", subdomain "dashboard-api"
-  //      -> record_name = "dashboard-api.sub" in zone "example.com"
-  //      -> FQDN: dashboard-api.sub.example.com
   routing_matrix = {
     for p in setproduct(local.domains, local.subdomains) :
     "${p[0]}|${p[1]}" => {
-      domain      = p[0]
-      subdomain   = p[1]
-      root_domain = local.domain_info[p[0]].root_domain
-      record_name = join(".", compact([p[1], local.domain_info[p[0]].prefix]))
+      domain    = p[0]
+      subdomain = p[1]
     }
   }
 }
@@ -103,17 +94,17 @@ resource "google_compute_target_https_proxy" "ingress" {
   certificate_map = "//certificatemanager.googleapis.com/${google_certificate_manager_certificate_map.certificate_map.id}"
 }
 
-data "cloudflare_zone" "zone" {
-  for_each = local.ingress_zones
-  name     = each.value
-}
-
-resource "cloudflare_record" "records" {
+resource "google_dns_record_set" "ingress_records" {
   for_each = local.routing_matrix
 
-  zone_id = data.cloudflare_zone.zone[each.value.root_domain].id
-  name    = each.value.record_name
-  content = google_compute_global_forwarding_rule.ingress.ip_address
+  managed_zone = (
+    each.value.domain == var.domain_name ?
+    google_dns_managed_zone.primary.name :
+    google_dns_managed_zone.additional[replace(each.value.domain, ".", "-")].name
+  )
+
+  name    = "${each.value.subdomain}.${each.value.domain}."
   type    = "A"
-  comment = var.gcp_project_id
+  ttl     = 300
+  rrdatas = [google_compute_global_forwarding_rule.ingress.ip_address]
 }

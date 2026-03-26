@@ -112,11 +112,11 @@ module "cluster" {
 
   environment = var.environment
 
-  gcp_project_id                   = var.gcp_project_id
-  gcp_region                       = var.gcp_region
-  gcp_zone                         = var.gcp_zone
-  google_service_account_key       = module.init.google_service_account_key
-  network_name                     = var.network_name
+  gcp_project_id             = var.gcp_project_id
+  gcp_region                 = var.gcp_region
+  gcp_zone                   = var.gcp_zone
+  google_service_account_key = module.init.google_service_account_key
+  network_name               = var.network_name
 
   build_clusters_config  = var.build_clusters_config
   client_clusters_config = var.client_clusters_config

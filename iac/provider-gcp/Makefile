@@ -83,7 +83,8 @@ tf_vars := \
 	$(call tfvar, AUTH_DB_MAX_OPEN_CONNECTIONS) \
 	$(call tfvar, AUTH_DB_MIN_IDLE_CONNECTIONS) \
 	$(call tfvar, GCS_GRPC_CONNECTION_POOL_SIZE) \
-	$(call tfvar, ADDITIONAL_API_PATHS_HANDLED_BY_INGRESS)
+	$(call tfvar, ADDITIONAL_API_PATHS_HANDLED_BY_INGRESS) \
+	$(call tfvar, JUMPHOST_IP)
 
 .PHONY: init
 init:
@@ -129,13 +130,13 @@ switch:
 .PHONY: destroy
 destroy:
 	@ printf "Destroying Terraform for env: `tput setaf 2``tput bold`$(ENV)`tput sgr0`\n\n"
-	@ $(tf_vars) $(TF) destroy $(TF_VAR_FILE_ARG)
+	@ $(tf_vars) $(TF) destroy $(TF_VAR_FILE_ARG) -auto-approve -input=false
 
 .PHONY: plan
 plan:
 	@ printf "Planning Terraform for env: `tput setaf 2``tput bold`$(ENV)`tput sgr0`\n\n"
 	@ $(call tf_fmt)
-	@ $(tf_vars) $(TF) plan $(TF_VAR_FILE_ARG) -out=.tfplan.$(ENV) -compact-warnings
+	@ $(tf_vars) $(TF) plan $(TF_VAR_FILE_ARG) -out=.tfplan.$(ENV) -compact-warnings -input=false
 
 .PHONY: terraform
 terraform:
@@ -150,27 +151,27 @@ terraform:
 plan-only-jobs/clickhouse:
 	@ printf "Planning Terraform for env: `tput setaf 2``tput bold`$(ENV)`tput sgr0`\n\n"
 	$(call tf_fmt)
-	$(tf_vars) $(TF) plan $(TF_VAR_FILE_ARG) -out=.tfplan.$(ENV) -compact-warnings -target="module.nomad.module.clickhouse.nomad_job.clickhouse"
+	$(tf_vars) $(TF) plan $(TF_VAR_FILE_ARG) -out=.tfplan.$(ENV) -compact-warnings -input=false -target="module.nomad.module.clickhouse.nomad_job.clickhouse"
 plan-only-jobs/clickhouse_migrator:
 	@ printf "Planning Terraform for env: `tput setaf 2``tput bold`$(ENV)`tput sgr0`\n\n"
 	$(call tf_fmt)
-	$(tf_vars) $(TF) plan $(TF_VAR_FILE_ARG) -out=.tfplan.$(ENV) -compact-warnings -target="module.nomad.module.clickhouse.nomad_job.clickhouse_migrator"
+	$(tf_vars) $(TF) plan $(TF_VAR_FILE_ARG) -out=.tfplan.$(ENV) -compact-warnings -input=false -target="module.nomad.module.clickhouse.nomad_job.clickhouse_migrator"
 plan-only-jobs/clickhouse_backup:
 	@ printf "Planning Terraform for env: `tput setaf 2``tput bold`$(ENV)`tput sgr0`\n\n"
 	$(call tf_fmt)
-	$(tf_vars) $(TF) plan $(TF_VAR_FILE_ARG) -out=.tfplan.$(ENV) -compact-warnings -target="module.nomad.module.clickhouse.nomad_job.clickhouse_backup"
+	$(tf_vars) $(TF) plan $(TF_VAR_FILE_ARG) -out=.tfplan.$(ENV) -compact-warnings -input=false -target="module.nomad.module.clickhouse.nomad_job.clickhouse_backup"
 plan-only-jobs/clickhouse_backup_restore:
 	@ printf "Planning Terraform for env: `tput setaf 2``tput bold`$(ENV)`tput sgr0`\n\n"
 	$(call tf_fmt)
-	$(tf_vars) $(TF) plan $(TF_VAR_FILE_ARG) -out=.tfplan.$(ENV) -compact-warnings -target="module.nomad.module.clickhouse.nomad_job.clickhouse_backup_restore"
+	$(tf_vars) $(TF) plan $(TF_VAR_FILE_ARG) -out=.tfplan.$(ENV) -compact-warnings -input=false -target="module.nomad.module.clickhouse.nomad_job.clickhouse_backup_restore"
 plan-only-jobs/%:
 	@ printf "Planning Terraform for env: `tput setaf 2``tput bold`$(ENV)`tput sgr0`\n\n"
 	$(call tf_fmt)
-	@ $(tf_vars) $(TF) plan $(TF_VAR_FILE_ARG) -out=.tfplan.$(ENV) -compact-warnings -target=module.nomad.nomad_job.$(subst -,_,$(notdir $@)) -target=module.nomad.module.$(subst -,_,$(notdir $@))
+	@ $(tf_vars) $(TF) plan $(TF_VAR_FILE_ARG) -out=.tfplan.$(ENV) -compact-warnings -input=false -target=module.nomad.nomad_job.$(subst -,_,$(notdir $@)) -target=module.nomad.module.$(subst -,_,$(notdir $@))
 plan-only-jobs:
 	@ printf "Planning Terraform for env: `tput setaf 2``tput bold`$(ENV)`tput sgr0`\n\n"
 	$(call tf_fmt)
-	@ $(tf_vars) $(TF) plan $(TF_VAR_FILE_ARG) -out=.tfplan.$(ENV) -compact-warnings -target=module.nomad
+	@ $(tf_vars) $(TF) plan $(TF_VAR_FILE_ARG) -out=.tfplan.$(ENV) -compact-warnings -input=false -target=module.nomad
 
 .PHONY: plan-without-jobs
 plan-without-jobs:
@@ -207,11 +208,8 @@ move:
 	@ printf "Moving resource for env: `tput setaf 2``tput bold`$(ENV)`tput sgr0`\n\n"
 	@ $(tf_vars) $(TF) state mv "$(SOURCE)" "$(TARGET)" -no-color
 
-# Login for Packer and Docker (uses gcloud user creds)
-# Login for Terraform (uses application default creds)
+# Login for Docker (uses gcloud service account creds)
 .PHONY: provider-login
 provider-login:
-	gcloud --quiet auth login
 	gcloud config set project "$(GCP_PROJECT_ID)"
 	gcloud --quiet auth configure-docker "$(GCP_REGION)-docker.pkg.dev"
-	gcloud --quiet auth application-default login
