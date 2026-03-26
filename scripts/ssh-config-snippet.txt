@@ -1,17 +1,11 @@
-Add this to your ~/.ssh/config on your PC
-
 Host e2b-jumphost
-  HostName <JUMPHOST_IP> # replace with your jumphost static IP
-  User <YOUR_USER> # replace with your GCP username (usually your Google account prefix)
+  HostName <JUMPHOST_IP>
+  User <YOUR_USER>
   IdentityFile ~/.ssh/id_rsa
   ServerAliveInterval 60
   ServerAliveCountMax 3
 
-# Tunnel to E2B API
 Host e2b-api
   HostName localhost
   Port 8443
   ProxyJump e2b-jumphost
-
-Access all services via jumphost in one command:
-ssh -L 8443:localhost:443 -L 8080:localhost:80 -L 3002:localhost:3002 -L 5000:localhost:5000 -L 8800:localhost:8800 -L 4646:localhost:4646 -N e2b-jumphost
