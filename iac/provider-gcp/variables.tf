@@ -741,3 +741,8 @@ variable "orchestrator_env_vars" {
   type    = map(string)
   default = {}
 }
+
+variable "jumphost_ip" {
+  description = "Static IP of the manually created jumphost VM. Find it in GCP Console > Compute Engine > VM Instances."
+  type        = string
+}
